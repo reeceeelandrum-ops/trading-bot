@@ -230,10 +230,11 @@ def plan_crypto(table: pd.DataFrame, held: dict[str, float], prices: dict[str, f
             elif score is not None and score <= cfg["news_sell_score"]:
                 trades.append(("sell", sym, qty, f"bad news, score {score:+d}"))
             continue
-        if cash - dollars < cfg["min_cash"]:
+        price = prices.get(sym)
+        wants = (gap > buf) or (norm(sym) in news_sold and gap >= -buf)
+        if wants and cash - dollars < cfg["min_cash"]:
             print(f"  {sym}: skipped, buying would take cash below ${cfg['min_cash']:,}")
             continue
-        price = prices.get(sym)
         if norm(sym) in news_sold:
             sold_at = news_sold[norm(sym)]
             if gap >= -buf and price and price >= sold_at * (1 + cfg["reentry_rebound_pct"] / 100):
@@ -355,8 +356,7 @@ def main():
         for side, sym, amt, why in plan_stocks(targets, set(cfg["universe"]), held, prices, cash, cfg,
                                                buy_check, lambda s: news.score(s)[0], news_sold, equity):
             trades.append((side, sym, amt, why, False))
-            if side == "buy":
-                cash -= prices.get(sym, 0) * amt
+            cash += (amt if side == "sell" else -amt) * prices.get(sym, 0)
     else:
         print("Stock market closed: skipping stocks this run.")
 
