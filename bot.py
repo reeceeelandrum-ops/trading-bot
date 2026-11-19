@@ -135,10 +135,21 @@ def latest_prices(stocks: list[str], cryptos: list[str]) -> dict[str, float]:
 
 # ---------- decisions (pure functions, no network) ----------
 
+def stock_dollars(cfg: dict, equity: float) -> float:
+    """Dollars per stock. "auto" splits what's left after the cash floor and the crypto
+    budget equally across max_positions; a number is used as is."""
+    v = cfg["stock_dollars"]
+    if v != "auto":
+        return float(v)
+    crypto = cfg["crypto"]["dollars"] * len(cfg["crypto"]["symbols"])
+    return max(0.0, (equity - cfg["min_cash"] - crypto) / cfg["max_positions"])
+
+
 def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], prices: dict[str, float],
-                cash: float, cfg: dict, buy_check, news_score, news_sold: dict[str, float]) -> list[tuple]:
+                cash: float, cfg: dict, buy_check, news_score, news_sold: dict[str, float],
+                equity: float = 100_000.0) -> list[tuple]:
     trades = []
-    dollars = cfg["stock_dollars"]
+    dollars = stock_dollars(cfg, equity)
 
     def shares_for(price, have=0.0):
         """Whole shares to bring a position up to about `dollars` worth."""
@@ -153,7 +164,15 @@ def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], 
         score = news_score(sym)
         if score is not None and score <= cfg["news_sell_score"]:
             trades.append(("sell", sym, held[sym], f"bad news, score {score:+d}"))
-    selling = {t[1] for t in trades}
+            continue
+        price = prices.get(sym)
+        if price and held[sym] * price > dollars * 1.25:  # grown well past its share: trim
+            extra = int(held[sym]) - int(dollars // price)
+            if extra > 0:
+                trades.append(("sell", sym, extra, f"trim to target size (${held[sym]*price:,.0f} vs ${dollars:,.0f})"))
+    selling = {t[1] for t in trades if not t[3].startswith("trim")}
+    # Sales go out before buys in the same run, so count their proceeds as available cash.
+    cash += sum(q * prices.get(s, 0.0) for side, s, q, _ in trades if side == "sell")
 
     for sym in targets:
         if sym in selling:
@@ -278,12 +297,12 @@ def main():
     now = datetime.now(timezone.utc)
     cryptos = cfg["crypto"]["symbols"]
 
-    client, held, cash, market_open = None, {}, float("inf"), True
+    client, held, cash, market_open, equity = None, {}, float("inf"), True, 100_000.0
     news_sold, done_today = {}, set()
     if not args.dry_run:
         client = get_trading_client()
         account, clock = client.get_account(), client.get_clock()
-        cash, market_open = float(account.cash), clock.is_open
+        cash, market_open, equity = float(account.cash), clock.is_open, float(account.equity)
         print("Connected to paper account." if PUBLIC_LOG else
               f"Connected to paper account {account.account_number} (cash ${cash:,.2f}).")
         print(f"Stock market open: {market_open}")
@@ -334,7 +353,7 @@ def main():
 
         print("\nStock checks:")
         for side, sym, amt, why in plan_stocks(targets, set(cfg["universe"]), held, prices, cash, cfg,
-                                               buy_check, lambda s: news.score(s)[0], news_sold):
+                                               buy_check, lambda s: news.score(s)[0], news_sold, equity):
             trades.append((side, sym, amt, why, False))
             if side == "buy":
                 cash -= prices.get(sym, 0) * amt
@@ -369,6 +388,7 @@ def main():
         print("Dry run (assumes nothing held): no orders placed.")
         return
 
+    trades.sort(key=lambda t: t[0] != "sell")  # sells first, so their cash funds the buys
     for side, sym, amt, why, is_c in trades:
         if (norm(sym), side) in done_today:
             print(f"  {sym}: already placed a {side} today, skipped")

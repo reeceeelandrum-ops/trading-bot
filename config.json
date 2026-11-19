@@ -4,8 +4,8 @@
     "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
     "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT"
   ],
-  "max_positions": 5,
-  "stock_dollars": 14000,
+  "max_positions": 10,
+  "stock_dollars": "auto",
   "min_cash": 20000,
   "momentum_lookback_days": 126,
 
