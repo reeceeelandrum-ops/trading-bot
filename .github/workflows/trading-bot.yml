@@ -30,6 +30,10 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # Safety gate: if any rule test fails, this step fails and the bot does not trade.
+      - name: Test rules
+        run: python -m unittest discover -s tests -v
+
       - name: Run bot
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}

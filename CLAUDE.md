@@ -40,6 +40,18 @@ volatility-managed momentum (12–20% targets); keyword news buy-block (hurt). D
 - Multi-agent "trading firm" designs (TradingAgents) report strong short-window results that others
   question (look-ahead from pretraining). Useful idea: an independent risk check with veto power.
 
+## Lessons from my own mistakes (keep adding)
+- **2026-11-19 — churned on day one.** Changed the rules (5 → 10 positions) hours after the first buys,
+  so the bot trimmed fresh positions at a small loss (−$54). Rule changes take effect at the next
+  monthly rebalance unless they fix a bug or a risk problem; decide the full setup before first trades.
+- **2026-11-19 — promised data I hadn't checked.** Said Alpaca news went back to 2015; on this plan it
+  covers ~7 months. Probe a data source's range before planning a test around it.
+- **2026-11-19 — bugs caught by hand, late** (dry-run crash on unlimited cash, misleading crypto cash
+  message, event-study counting). Every rule now has a test in `tests/test_rules.py`, and GitHub runs
+  them before each trading run; a failing test blocks trading. Add a test with every rule change.
+- **Judge results against the market, not zero.** A red day when SPY is −2% is not a strategy failure;
+  compare to SPY over months, not days.
+
 ## Safety
 - `TradingClient(..., paper=True)` only. Never switch to a live account.
 - Third-party skills or scripts that touch keys must be read in full before use.
