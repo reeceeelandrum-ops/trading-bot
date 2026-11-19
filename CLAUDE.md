@@ -13,7 +13,8 @@ personal paths.
   that then beat the average (`news_backtest.py`).
 - **Crypto:** `crypto.symbols` on a daily SMA `short_window`/`long_window` trend with `buffer_pct`.
 - **Every run:** very-bad-news sell (`news_sell_score`, a rare safety valve with no proven edge), rebound buy-back (`reentry_*`), cash never below
-  `min_cash`, never touch positions outside the bot's lists, at most one buy and one sell per
+  `min_cash`, never touch positions outside the bot's lists or on the `hands_off` list (the user's
+  own holdings, e.g. NVDA and MU; also excluded from sizing), at most one buy and one sell per
   symbol per day.
 
 ## How changes are made (the quant loop)
