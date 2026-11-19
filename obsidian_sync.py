@@ -315,6 +315,9 @@ views:
 
 ## Notes
 [[Trade log]] · [[Strategy]] · [Bot code]({REPO_URL}) · [Bot runs]({REPO_URL}/actions)
+
+## Second brain (trading wiki)
+[[START-HERE|Start here]] · [[index|Wiki index]] · [[money-management]] · [[position-sizing-formulas-and-drawdown-math]] · [[golden-cross-death-cross]] · [[relative-strength-analysis]] · [[Trading Journal]]
 """)
 
     print(f"Wrote notes to {VAULT}: Home base, Daily/{today}, {len(watch)} stock notes, Trade log, Strategy")

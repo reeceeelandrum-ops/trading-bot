@@ -76,25 +76,47 @@ def run_trend(opens, closes, short, long, buffer, slots, trading_days=252):
     return pd.Series(curve, index=closes.index[long + 1:]), trades, inv_days / len(curve)
 
 
-def run_momentum(opens, closes, slots, lookback=126):
+def run_momentum(opens, closes, slots, lookback=126, regime=None, trail=None):
+    """Monthly top-`slots` momentum. Optional:
+    regime: bool Series (known before each open); when False, hold cash.
+    trail:  trailing stop, e.g. 0.15 = sell if the close falls 15% below its peak since
+            buying; the stock then sits out until the next monthly rebalance."""
     mom = (closes / closes.shift(lookback) - 1).shift(1)
-    cash, held, trades = CASH, {}, 0
+    cash, held, peak, stopped, trades, inv = CASH, {}, {}, set(), 0, 0
     curve, last_month = [], None
-    for day in closes.index[lookback + 1:]:
-        if day.month != last_month:  # rebalance on the first trading day of each month
-            last_month = day.month
-            o = opens.loc[day]
-            pick = list(mom.loc[day].dropna().sort_values(ascending=False).index[:slots])
+    days = closes.index[lookback + 1:]
+    for day in days:
+        o = opens.loc[day]
+        risk_on = True if regime is None else bool(regime.get(day, True))
+        new_month = day.month != last_month
+        if new_month:
+            last_month, stopped = day.month, set()
+        if not risk_on and held:
             for sym in list(held):
-                if sym not in pick:
-                    cash += held.pop(sym) * o[sym] * (1 - SLIP); trades += 1
+                cash += held.pop(sym) * o[sym] * (1 - SLIP); trades += 1
+        if trail is not None:
+            prev = closes.shift(1).loc[day]
+            for sym in list(held):
+                peak[sym] = max(peak.get(sym, 0), prev[sym])
+                if prev[sym] < peak[sym] * (1 - trail):
+                    cash += held.pop(sym) * o[sym] * (1 - SLIP); trades += 1; stopped.add(sym)
+        if risk_on and (new_month or len(held) < slots):
+            pick = [s for s in mom.loc[day].dropna().sort_values(ascending=False).index[:slots]]
+            if new_month:
+                for sym in list(held):
+                    if sym not in pick:
+                        cash += held.pop(sym) * o[sym] * (1 - SLIP); trades += 1
             value = cash + sum(q * o[k] for k, q in held.items())
             for sym in pick:
-                if sym not in held:
+                if sym not in held and sym not in stopped and not np.isnan(o[sym]):
                     spend = min(cash, value / slots)
+                    if spend < 1:
+                        break
                     held[sym] = spend / (o[sym] * (1 + SLIP)); cash -= spend; trades += 1
+                    peak[sym] = o[sym]
+        inv += bool(held)
         curve.append(cash + sum(q * closes.loc[day, k] for k, q in held.items()))
-    return pd.Series(curve, index=closes.index[lookback + 1:]), trades
+    return pd.Series(curve, index=days), trades, inv / len(days)
 
 
 def main():
@@ -115,8 +137,21 @@ def main():
         rows.append(stats(f"Trend, ±{b:g}% buffer", e2.reindex(common), t2, i2))
     e3, t3, i3 = run_trend(so, sc, short, long, buf, 10)
     rows.append(stats("Trend, 10 positions", e3.reindex(common), t3, i3))
-    em, tm = run_momentum(so, sc, slots)
-    rows.append(stats(f"Momentum, top {slots} monthly", em.reindex(common), tm, 1.0))
+    em, tm, im = run_momentum(so, sc, slots)
+    rows.append(stats(f"Momentum, top {slots} monthly (live bot)", em.reindex(common), tm, im))
+    # Ideas from the second-brain wiki (Murphy, golden-cross evidence, position-sizing notes)
+    spy_c = closes["SPY"]
+    golden = (spy_c.rolling(50).mean() > spy_c.rolling(200).mean()).shift(1)
+    above200 = (spy_c > spy_c.rolling(200).mean()).shift(1)
+    for label, kw in [("+ SPY golden-cross filter", {"regime": golden}),
+                      ("+ SPY above 200-day filter", {"regime": above200}),
+                      ("+ 15% trailing stop", {"trail": 0.15}),
+                      ("+ 25% trailing stop", {"trail": 0.25}),
+                      ("+ golden-cross filter + 15% stop", {"regime": golden, "trail": 0.15})]:
+        e, t, i = run_momentum(so, sc, slots, **kw)
+        rows.append(stats(f"Momentum {label}", e.reindex(common), t, i))
+    e10, t10, i10 = run_momentum(so, sc, 10)
+    rows.append(stats("Momentum, top 10 monthly", e10.reindex(common), t10, i10))
     spy = closes["SPY"].reindex(common)
     rows.append(stats("Buy and hold SPY", spy / spy.iloc[0] * CASH, 1, 1.0))
     ew = (sc.reindex(common) / sc.reindex(common).iloc[0]).mean(axis=1)
@@ -128,7 +163,9 @@ def main():
     crows = []
     for sym in ["BTC-USD", "ETH-USD"]:
         e, t, i = run_trend(co[[sym]], cc[[sym]], short, long, buf, 1, 365)
-        crows.append(stats(f"{sym[:3]} trend, current rules", e, t, i))
+        crows.append(stats(f"{sym[:3]} trend 20/50 (live bot)", e, t, i))
+        e2, t2, i2 = run_trend(co[[sym]], cc[[sym]], 50, 200, buf, 1, 365)
+        crows.append(stats(f"{sym[:3]} golden cross 50/200", e2.reindex(e.index), t2, i2))
         p = cc[sym].reindex(e.index)
         crows.append(stats(f"{sym[:3]} buy and hold", p / p.iloc[0] * CASH, 1, 1.0))
     print("\nCRYPTO")
