@@ -5,7 +5,7 @@
     "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT"
   ],
   "max_positions": 5,
-  "trade_size": 1,
+  "stock_dollars": 14000,
   "min_cash": 20000,
   "momentum_lookback_days": 126,
 

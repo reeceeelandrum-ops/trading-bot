@@ -211,7 +211,7 @@ def main():
 
     # ---- strategy settings ----
     labels = {
-        "max_positions": "Most stocks held at once", "trade_size": "Shares per trade",
+        "max_positions": "Most stocks held at once", "stock_dollars": "Dollars per stock",
         "min_cash": "Cash floor ($)", "short_window": "Short average (days)",
         "long_window": "Long average (days)", "buffer_pct": "Trend buffer (%)",
         "earnings_blackout_days": "No buys this many days before earnings",

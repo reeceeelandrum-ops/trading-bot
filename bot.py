@@ -138,7 +138,12 @@ def latest_prices(stocks: list[str], cryptos: list[str]) -> dict[str, float]:
 def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], prices: dict[str, float],
                 cash: float, cfg: dict, buy_check, news_score, news_sold: dict[str, float]) -> list[tuple]:
     trades = []
-    size = cfg["trade_size"]
+    dollars = cfg["stock_dollars"]
+
+    def shares_for(price, have=0.0):
+        """Whole shares to bring a position up to about `dollars` worth."""
+        return max(0, int(dollars // price) - int(have))
+
     bot_held = {s for s, q in held.items() if q > 0 and s in universe}
 
     for sym in sorted(bot_held):
@@ -151,22 +156,33 @@ def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], 
     selling = {t[1] for t in trades}
 
     for sym in targets:
-        if sym in bot_held and sym not in selling:
-            continue
         if sym in selling:
             continue
         price = prices.get(sym)
         if price is None:
             print(f"  {sym}: skipped, no current price")
             continue
-        if cash - price * size < cfg["min_cash"]:
+        have = held.get(sym, 0.0) if sym in bot_held else 0.0
+        if have and have * price >= dollars * 0.8:
+            continue  # already close enough to the target size
+        qty = shares_for(price, have)
+        if qty == 0:
+            if not have:
+                print(f"  {sym}: skipped, one share (${price:,.2f}) is more than ${dollars:,} per stock")
+            continue
+        # Never let a buy take cash below the floor: shrink it to fit.
+        room = cash - cfg["min_cash"]
+        if room != float("inf"):  # dry runs have no account, so cash is unlimited
+            qty = min(qty, int(max(0.0, room) // price))
+        if qty == 0:
             print(f"  {sym}: skipped, buying would take cash below ${cfg['min_cash']:,}")
             continue
+        top_up = f"top-up from {have:g} shares; " if have else ""
         if sym in news_sold:
             sold_at = news_sold[sym]
             if price >= sold_at * (1 + cfg["reentry_rebound_pct"] / 100):
-                trades.append(("buy", sym, size, f"rebound: {price:.2f} is {price/sold_at*100-100:+.1f}% above news-sale price {sold_at:.2f}"))
-                cash -= price * size
+                trades.append(("buy", sym, qty, f"rebound: {price:.2f} is {price/sold_at*100-100:+.1f}% above news-sale price {sold_at:.2f}"))
+                cash -= price * qty
             else:
                 print(f"  {sym}: sold on bad news at {sold_at:.2f}; waiting for a {cfg['reentry_rebound_pct']}% rebound (now {price:.2f})")
             continue
@@ -178,8 +194,8 @@ def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], 
         if score is not None and score <= cfg["news_block_buy_score"]:
             print(f"  {sym}: skipped, negative news (score {score:+d})")
             continue
-        trades.append(("buy", sym, size, f"top-momentum target; {note}; news {'n/a' if score is None else f'{score:+d}'}"))
-        cash -= price * size
+        trades.append(("buy", sym, qty, f"{top_up}top-momentum target, ~${qty*price:,.0f}; {note}; news {'n/a' if score is None else f'{score:+d}'}"))
+        cash -= price * qty
     return trades
 
 
