@@ -5,3 +5,4 @@ bot.log
 last_trade.json
 .DS_Store
 .tools/
+mac-schedule.plist.disabled
