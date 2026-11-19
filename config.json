@@ -10,5 +10,12 @@
   "short_window": 20,
   "long_window": 50,
   "buffer_pct": 1.0,
-  "lookback_days": 100
+  "lookback_days": 100,
+
+  "earnings_blackout_days": 5,
+  "require_profitable": true,
+  "min_revenue_growth_pct": 0,
+  "news_lookback_days": 3,
+  "news_block_buy_score": -2,
+  "news_sell_score": -4
 }

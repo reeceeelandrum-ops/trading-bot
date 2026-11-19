@@ -3,9 +3,13 @@
 Every run, for each stock in config.json's "universe":
   gap = how far the short moving average is above (+) or below (-) the long one, in %.
 
-Rules (applied the same way every day, no judgment calls):
-  SELL  a stock the bot holds once its gap falls below -buffer_pct (clear downtrend).
-  BUY   stocks with a gap above +buffer_pct (clear uptrend), strongest gap first,
+Rules (applied the same way every day, no judgment calls; see signals.py):
+  SELL  a stock the bot holds once its gap falls below -buffer_pct (clear downtrend),
+        or its recent news score drops to news_sell_score or lower.
+  BUY   stocks with a gap above +buffer_pct (clear uptrend), strongest gap first, that
+          - don't report earnings within earnings_blackout_days,
+          - are profitable (if require_profitable) with revenue growth >= min_revenue_growth_pct,
+          - have a news score above news_block_buy_score,
         until the bot holds max_positions stocks or cash would drop below min_cash.
   Between -buffer_pct and +buffer_pct nothing changes (filters out whipsaws).
 Positions in stocks outside the universe are never touched.
@@ -26,6 +30,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
+
+from signals import NewsScorer, company_check, earnings_check
 
 HERE = Path(__file__).resolve().parent
 NY = ZoneInfo("America/New_York")
@@ -69,30 +75,52 @@ def trend_table(closes: pd.DataFrame, short: int, long: int) -> pd.DataFrame:
     return pd.DataFrame.from_dict(rows, orient="index").sort_values("gap_pct", ascending=False)
 
 
-def plan_trades(table: pd.DataFrame, held: dict[str, float], cash: float, cfg: dict) -> list[tuple]:
-    """Pure decision logic. Returns [(side, symbol, qty, reason), ...]."""
+def plan_trades(table: pd.DataFrame, held: dict[str, float], cash: float, cfg: dict,
+                buy_check=lambda sym: (True, ""), news_score=lambda sym: None) -> list[tuple]:
+    """Pure decision logic. Returns [(side, symbol, qty, reason), ...].
+
+    buy_check(sym) -> (ok, note): earnings + company checks for a buy candidate.
+    news_score(sym) -> int | None: summed headline score (None = no news data).
+    """
     buffer, size = cfg["buffer_pct"], cfg["trade_size"]
     trades = []
 
-    # 1) Sells: held stocks in a clear downtrend.
+    # 1) Sells: held stocks in a clear downtrend, or with very bad recent news.
     holding = {s for s, q in held.items() if q > 0 and s in table.index}
     for sym in sorted(holding):
         gap = table.at[sym, "gap_pct"]
+        reason = None
         if gap < -buffer:
-            trades.append(("sell", sym, min(held[sym], size), f"downtrend, gap {gap:+.2f}%"))
+            reason = f"downtrend, gap {gap:+.2f}%"
+        else:
+            score = news_score(sym)
+            if score is not None and score <= cfg["news_sell_score"]:
+                reason = f"bad news, score {score:+d}"
+        if reason:
+            trades.append(("sell", sym, min(held[sym], size), reason))
             holding.discard(sym)
 
-    # 2) Buys: strongest clear uptrends first, within the position and cash limits.
+    # 2) Buys: strongest clear uptrends first that pass the earnings, company, and
+    #    news checks, within the position and cash limits.
     for sym, row in table.iterrows():  # already sorted strongest first
         if len(holding) >= cfg["max_positions"]:
             break
         if sym in holding or row.gap_pct <= buffer:
             continue
+        ok, note = buy_check(sym)
+        if not ok:
+            print(f"  {sym}: skipped, {note}")
+            continue
+        score = news_score(sym)
+        if score is not None and score <= cfg["news_block_buy_score"]:
+            print(f"  {sym}: skipped, negative news (score {score:+d})")
+            continue
         cost = row.close * size
         if cash - cost < cfg["min_cash"]:
             print(f"  {sym}: skipped, buying would take cash below ${cfg['min_cash']:,}")
             continue
-        trades.append(("buy", sym, size, f"uptrend, gap {row.gap_pct:+.2f}%"))
+        news = "no news data" if score is None else f"news {score:+d}"
+        trades.append(("buy", sym, size, f"uptrend, gap {row.gap_pct:+.2f}%; {note}; {news}"))
         holding.add(sym)
         cash -= cost
     return trades
@@ -137,6 +165,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="don't connect or place orders")
     args = parser.parse_args()
     cfg = load_config()
+    load_dotenv(HERE / ".env")  # keys are also used for the read-only news check in dry runs
 
     client, held, cash, today = None, {}, float("inf"), None
     if not args.dry_run:
@@ -166,7 +195,26 @@ def main():
             print(f"Skipping stocks without today's price data: {', '.join(stale)}")
             table = table.drop(stale)
 
-    trades = plan_trades(table, held, cash, cfg)
+    news = NewsScorer(cfg["news_lookback_days"])
+    if news.client is None:
+        print("No API keys available, so the news check is off for this run.")
+
+    def buy_check(sym):
+        ok, e_note = earnings_check(sym, cfg["earnings_blackout_days"])
+        if not ok:
+            return False, e_note
+        ok, c_note = company_check(sym, cfg["require_profitable"], cfg["min_revenue_growth_pct"])
+        return ok, c_note if not ok else f"{c_note}, {e_note}"
+
+    print("\nChecks:")
+    trades = plan_trades(table, held, cash, cfg, buy_check, lambda s: news.score(s)[0])
+
+    # Show the headlines behind every news score that was used.
+    for sym, (score, lines) in news.cache.items():
+        if lines:
+            print(f"  {sym} news {score:+d}:")
+            for line in lines[:5]:
+                print(f"     {line[:110]}")
     if not trades:
         print("\nNo trades needed today.")
         return
