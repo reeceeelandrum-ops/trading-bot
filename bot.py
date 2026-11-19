@@ -1,8 +1,14 @@
-"""Moving-average crossover trading bot for an Alpaca PAPER account.
+"""Moving-average trading bot for an Alpaca PAPER account.
 
-Run once a day (e.g. after the market opens):
-    python bot.py            # checks for a crossover and trades if one happened
-    python bot.py --dry-run  # shows the signal without placing an order
+Two modes (set "mode" in config.json):
+  crossover  trade only on the day the short average crosses the long one
+  trend      hold `trade_size` shares while the short average is more than
+             `buffer_pct` % above the long one, none while it's more than
+             `buffer_pct` % below, and leave the position alone in between
+
+Run once a day during market hours:
+    python bot.py            # checks the signal and trades if needed
+    python bot.py --dry-run  # shows the signal without connecting or trading
 """
 
 import argparse
@@ -45,21 +51,46 @@ def fetch_prices(symbol: str, lookback_days: int) -> pd.Series:
     return close.dropna().tail(lookback_days)
 
 
-def detect_crossover(close: pd.Series, short: int, long: int) -> tuple[str | None, pd.DataFrame]:
-    """Return 'buy', 'sell', or None, comparing the last two consecutive days."""
+def moving_averages(close: pd.Series, short: int, long: int) -> pd.DataFrame:
     df = pd.DataFrame({"close": close})
     df["sma_short"] = close.rolling(short).mean()
     df["sma_long"] = close.rolling(long).mean()
     df = df.dropna()
     if len(df) < 2:
         sys.exit("Not enough data to compare two days of moving averages")
+    # How far the short average is above (+) or below (-) the long one, in percent.
+    df["gap_pct"] = (df.sma_short - df.sma_long) / df.sma_long * 100
+    return df
 
+
+def detect_crossover(close: pd.Series, short: int, long: int) -> tuple[str | None, pd.DataFrame]:
+    """Return 'buy', 'sell', or None, comparing the last two consecutive days."""
+    df = moving_averages(close, short, long)
     prev, today = df.iloc[-2], df.iloc[-1]
     if prev.sma_short <= prev.sma_long and today.sma_short > today.sma_long:
         return "buy", df
     if prev.sma_short >= prev.sma_long and today.sma_short < today.sma_long:
         return "sell", df
     return None, df
+
+
+def decide_trend(gap_pct: float, buffer_pct: float, held: float, trade_size: float):
+    """Trend mode: hold `trade_size` shares while the short average is clearly above
+    the long one, hold none while it's clearly below, and change nothing while the two
+    are within `buffer_pct` of each other (that dead zone filters out whipsaws).
+
+    Returns (side, qty, reason); side is None when no trade is needed.
+    """
+    if gap_pct > buffer_pct:
+        if held < trade_size:
+            return "buy", trade_size - held, f"uptrend (gap {gap_pct:+.2f}% > +{buffer_pct}%)"
+        return None, 0, f"uptrend (gap {gap_pct:+.2f}%), already holding {held:g}"
+    if gap_pct < -buffer_pct:
+        if held > 0:
+            # Only sell what the bot would have bought, never more.
+            return "sell", min(held, trade_size), f"downtrend (gap {gap_pct:+.2f}% < -{buffer_pct}%)"
+        return None, 0, f"downtrend (gap {gap_pct:+.2f}%), holding nothing"
+    return None, 0, f"inside the ±{buffer_pct}% buffer (gap {gap_pct:+.2f}%): keeping current position"
 
 
 def get_trading_client():
@@ -123,20 +154,34 @@ def main():
             print("Market is closed (weekend, holiday, or outside hours). No trade.")
             return
 
+    mode = cfg.get("mode", "crossover")
+    buffer_pct = float(cfg.get("buffer_pct", 0))
+    trade_size = cfg["trade_size"]
+
     close = fetch_prices(symbol, cfg["lookback_days"])
     signal, df = detect_crossover(close, short, long)
 
     last = df.iloc[-1]
     print(f"{symbol} on {df.index[-1].date()}: close={last.close:.2f}  "
-          f"SMA{short}={last.sma_short:.2f}  SMA{long}={last.sma_long:.2f}")
+          f"SMA{short}={last.sma_short:.2f}  SMA{long}={last.sma_long:.2f}  "
+          f"gap={last.gap_pct:+.2f}%  mode={mode}")
 
-    if signal is None:
-        print("No crossover between the last two days. No trade.")
-        return
+    if mode == "trend":
+        held = 0.0 if args.dry_run else held_qty(client, symbol)
+        signal, qty, reason = decide_trend(last.gap_pct, buffer_pct, held, trade_size)
+        print(f"Trend check: {reason}" + (" (dry run assumes 0 shares held)" if args.dry_run else ""))
+        if signal is None:
+            print("No trade.")
+            return
+    else:
+        if signal is None:
+            print("No crossover between the last two days. No trade.")
+            return
+        print(f"Crossover detected: {signal.upper()} signal")
+        qty = trade_size
 
-    print(f"Crossover detected: {signal.upper()} signal")
     if args.dry_run:
-        print("Dry run: no order placed.")
+        print(f"Dry run: would {signal} {qty:g} {symbol}. No order placed.")
         return
 
     # Only act on a signal from today's price bar, so a stale signal is never re-traded.
@@ -150,8 +195,7 @@ def main():
         print(f"Already placed a {symbol} order today. No new trade.")
         return
 
-    qty = cfg["trade_size"]
-    if signal == "sell":
+    if signal == "sell" and mode != "trend":
         owned = held_qty(client, symbol)
         if owned <= 0:
             print(f"No {symbol} shares held, so nothing to sell (bot doesn't short).")

@@ -3,5 +3,7 @@
   "short_window": 20,
   "long_window": 50,
   "trade_size": 1,
-  "lookback_days": 100
+  "lookback_days": 100,
+  "mode": "trend",
+  "buffer_pct": 1.0
 }
