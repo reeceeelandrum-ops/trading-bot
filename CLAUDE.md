@@ -14,7 +14,7 @@ personal paths.
 - **Crypto:** `crypto.symbols` on a daily SMA `short_window`/`long_window` trend with `buffer_pct`.
 - **Every run:** very-bad-news sell (`news_sell_score`, a rare safety valve with no proven edge), rebound buy-back (`reentry_*`), cash never below
   `min_cash`, never touch positions outside the bot's lists or on the `hands_off` list (the user's
-  own holdings, e.g. NVDA and MU; also excluded from sizing), at most one buy and one sell per
+  own holdings, e.g. NVDA and MU; sizing still uses the whole account), at most one buy and one sell per
   symbol per day.
 
 ## How changes are made (the quant loop)
@@ -50,6 +50,10 @@ volatility-managed momentum (12–20% targets); keyword news buy-block (hurt). D
 - **2026-11-19 — bugs caught by hand, late** (dry-run crash on unlimited cash, misleading crypto cash
   message, event-study counting). Every rule now has a test in `tests/test_rules.py`, and GitHub runs
   them before each trading run; a failing test blocks trading. Add a test with every rule change.
+- **2026-11-19 — a protection caused churn.** Excluding hands-off holdings from sizing made the
+  user's $15k NVDA buy shrink every bot target, so all 10 positions sat at the trim line. Caught by
+  simulating the next day before the open. Simulate the next session after ANY change, including
+  changes made to protect something.
 - **Judge results against the market, not zero.** A red day when SPY is −2% is not a strategy failure;
   compare to SPY over months, not days.
 

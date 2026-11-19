@@ -319,8 +319,9 @@ def main():
         print(f"Stock market open: {market_open}")
         positions = client.get_all_positions()
         held = {norm(p.symbol): float(p.qty) for p in positions if norm(p.symbol) not in cfg["hands_off"]}
-        # Size the bot's positions from what the bot manages, not from the user's own holdings.
-        equity -= sum(float(p.market_value) for p in positions if norm(p.symbol) in cfg["hands_off"])
+        # Sizing uses the whole account. Subtracting hands-off holdings made a manual purchase
+        # shrink every target and trigger trims (2026-11-19 lesson); the cash floor already stops
+        # the bot spending money it doesn't have.
         midnight = now.astimezone(NY).replace(hour=0, minute=0, second=0, microsecond=0)
         for o in recent_orders(client, now - timedelta(days=cfg["reentry_days"] + 3)):
             st = getattr(o.status, "value", o.status)
