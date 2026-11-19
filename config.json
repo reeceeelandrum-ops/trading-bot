@@ -22,7 +22,7 @@
   "require_profitable": true,
   "min_revenue_growth_pct": 0,
   "news_lookback_days": 3,
-  "news_block_buy_score": -2,
+  "news_block_buy_score": null,
   "news_sell_score": -4,
   "reentry_days": 5,
   "reentry_rebound_pct": 3

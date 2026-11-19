@@ -218,7 +218,7 @@ def main():
         "require_profitable": "Only buy profitable companies",
         "min_revenue_growth_pct": "Minimum sales growth (%)",
         "news_lookback_days": "News window (days)",
-        "news_block_buy_score": "Skip buys at news score",
+        "news_block_buy_score": "Skip buys at news score (blank = off)",
         "news_sell_score": "Sell holding at news score",
         "momentum_lookback_days": "Momentum window (trading days)",
         "reentry_days": "Watch for rebound after news sale (days)",

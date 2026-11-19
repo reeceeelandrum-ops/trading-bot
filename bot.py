@@ -4,8 +4,9 @@ STOCKS (config "universe", during regular market hours)
   Monthly momentum: rank the universe by return over the last momentum_lookback_days
   trading days, measured at the end of the previous month. The top max_positions are
   this month's targets, fixed for the whole month.
-  BUY   targets not held, strongest first, that pass the earnings, company and news
-        checks (see signals.py), while cash stays above min_cash.
+  BUY   targets not held, strongest first, that pass the earnings and company checks
+        (see signals.py), while cash stays above min_cash. The news buy-block is off by
+        default (news_block_buy_score: null) after a backtest showed it hurt.
   SELL  held universe stocks that are no longer targets.
 
 CRYPTO (config "crypto", 24/7)
@@ -135,6 +136,12 @@ def latest_prices(stocks: list[str], cryptos: list[str]) -> dict[str, float]:
 
 # ---------- decisions (pure functions, no network) ----------
 
+def blocks_buy(score, cfg: dict) -> bool:
+    """News buy-block. Off when news_block_buy_score is null: a test on 9,348 headlines
+    (Apr-Nov 2026, news_backtest.py) found blocked stocks went on to beat the average."""
+    limit = cfg.get("news_block_buy_score")
+    return limit is not None and score is not None and score <= limit
+
 def stock_dollars(cfg: dict, equity: float) -> float:
     """Dollars per stock. "auto" splits what's left after the cash floor and the crypto
     budget equally across max_positions; a number is used as is."""
@@ -210,7 +217,7 @@ def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], 
             print(f"  {sym}: skipped, {note}")
             continue
         score = news_score(sym)
-        if score is not None and score <= cfg["news_block_buy_score"]:
+        if blocks_buy(score, cfg):
             print(f"  {sym}: skipped, negative news (score {score:+d})")
             continue
         trades.append(("buy", sym, qty, f"{top_up}top-momentum target, ~${qty*price:,.0f}; {note}; news {'n/a' if score is None else f'{score:+d}'}"))
@@ -242,7 +249,7 @@ def plan_crypto(table: pd.DataFrame, held: dict[str, float], prices: dict[str, f
                 cash -= dollars
             continue
         if gap > buf:
-            if score is not None and score <= cfg["news_block_buy_score"]:
+            if blocks_buy(score, cfg):
                 print(f"  {sym}: skipped, negative news (score {score:+d})")
                 continue
             trades.append(("buy", sym, dollars, f"uptrend, gap {gap:+.2f}%"))

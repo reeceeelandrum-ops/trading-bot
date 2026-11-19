@@ -8,9 +8,11 @@ personal paths.
 - **Stocks:** monthly momentum. Rank the `universe` by return over `momentum_lookback_days` to the end
   of last month; the top `max_positions` that pass the company check are the month's targets.
   Equal dollars per stock (`stock_dollars: "auto"`), top up below 80%, trim above 125%,
-  sell stocks that leave the targets. Buys wait out earnings (`earnings_blackout_days`) and bad news.
+  sell stocks that leave the targets. Buys wait out earnings (`earnings_blackout_days`).
+  The news buy-block (`news_block_buy_score`) is **off** (null) since 2026-11-19: it skipped stocks
+  that then beat the average (`news_backtest.py`).
 - **Crypto:** `crypto.symbols` on a daily SMA `short_window`/`long_window` trend with `buffer_pct`.
-- **Every run:** news sell (`news_sell_score`), rebound buy-back (`reentry_*`), cash never below
+- **Every run:** very-bad-news sell (`news_sell_score`, a rare safety valve with no proven edge), rebound buy-back (`reentry_*`), cash never below
   `min_cash`, never touch positions outside the bot's lists, at most one buy and one sell per
   symbol per day.
 
@@ -29,7 +31,7 @@ personal paths.
 ## Already tested — don't re-propose without new evidence
 SPY golden-cross and 200-day regime filters; 15–25% trailing stops; 12-month and 12-1 momentum
 (no better than 6-month); 5 vs 8 vs 10 vs 15 positions (10 chosen); crypto 50/200 cross;
-volatility-managed momentum (12–20% targets). Details in the experiment log.
+volatility-managed momentum (12–20% targets); keyword news buy-block (hurt). Details in the experiment log.
 
 ## Lessons from other AI trading agents (2026-11 research)
 - Live LLM trading contests (Alpha Arena season 1, LiveTradeBench) mostly lost money; the losers

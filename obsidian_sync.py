@@ -256,9 +256,9 @@ Back to [[Home base]]
 The bot runs on [GitHub Actions]({REPO_URL}/actions) every 15 minutes and trades the paper account by fixed rules:
 
 - **Stocks, monthly momentum:** rank the Dow 30 by their return over the six months to the end of last month. The top ten (see "Most stocks held at once") that are profitable with growing sales are the month's targets.
-- **Buy** targets it doesn't hold, about the same dollar amount each (whole shares; see "Dollars per stock"), waiting out upcoming earnings and bad headlines; top up any target well below that size; **sell** stocks that drop out of the targets.
+- **Buy** targets it doesn't hold, about the same dollar amount each (whole shares; see "Dollars per stock"), waiting out upcoming earnings; top up any target well below that size; **sell** stocks that drop out of the targets.
 - **Crypto, daily trend (24/7):** hold a set dollar amount of Bitcoin and Ethereum while the 20-day average is clearly above the 50-day; sell when clearly below.
-- **News sell:** every run, sell a holding whose recent headlines score very badly.
+- **News sell (safety valve):** every run, sell a holding whose recent headlines score very badly. Bad-but-not-terrible news no longer blocks buys: a backtest showed those stocks went on to beat the average.
 - **Rebound buy-back:** within 5 days of a news sale, buy back if the price climbs 3% above the sale price.
 - Cash never drops below the floor, and positions you bought yourself are never touched.
 
