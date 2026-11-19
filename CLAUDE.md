@@ -41,6 +41,11 @@ volatility-managed momentum (12–20% targets); keyword news buy-block (hurt). D
 - Multi-agent "trading firm" designs (TradingAgents) report strong short-window results that others
   question (look-ahead from pretraining). Useful idea: an independent risk check with veto power.
 
+## Evidence status (keep honest)
+- 2026-11-19 residual-edge-analyzer (`research/residual_edge_2026-11/`): top-10 momentum's alpha vs SPY
+  +2.8%/yr, t=0.95; vs equal-weight Dow +0.7%/yr. Most of the backtest edge is market + Dow exposure.
+  Treat the strategy as unproven until out-of-sample (live paper) data says otherwise.
+
 ## Lessons from my own mistakes (keep adding)
 - **2026-11-19 — churned on day one.** Changed the rules (5 → 10 positions) hours after the first buys,
   so the bot trimmed fresh positions at a small loss (−$54). Rule changes take effect at the next
