@@ -1,0 +1,6 @@
+.env
+__pycache__/
+.venv/
+bot.log
+last_trade.json
+.DS_Store

@@ -1,0 +1,7 @@
+{
+  "symbol": "AAPL",
+  "short_window": 20,
+  "long_window": 50,
+  "trade_size": 1,
+  "lookback_days": 100
+}
