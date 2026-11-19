@@ -98,6 +98,8 @@ class NewsScorer:
 
     def score(self, symbol: str) -> tuple[int | None, list[str]]:
         """Sum of headline scores over the lookback window, plus the scored headlines."""
+        if "/" in symbol:  # crypto: Alpaca's feed has none, so use Yahoo Finance headlines
+            return self._crypto_score(symbol)
         if self.client is None:
             return None, []
         if symbol not in self.cache:
@@ -110,6 +112,27 @@ class NewsScorer:
             # Only count stories mainly about this company, not roundups naming many tickers.
             items = [n for n in items if len(n.symbols) <= 3]
             scored = [(headline_score(n.headline), n.headline) for n in items]
+            total = sum(s for s, _ in scored)
+            self.cache[symbol] = (total, [f"{s:+d} {h}" for s, h in scored if s])
+        return self.cache[symbol]
+
+    def _crypto_score(self, symbol: str) -> tuple[int | None, list[str]]:
+        if symbol not in self.cache:
+            try:
+                items = yf.Ticker(symbol.replace("/", "-")).news or []
+            except Exception:
+                return None, []
+            cutoff = datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
+            scored = []
+            for item in items:
+                c = item.get("content", item)
+                title, when = c.get("title") or "", c.get("pubDate")
+                try:
+                    if when and datetime.fromisoformat(when.replace("Z", "+00:00")) < cutoff:
+                        continue
+                except ValueError:
+                    pass
+                scored.append((headline_score(title), title))
             total = sum(s for s, _ in scored)
             self.cache[symbol] = (total, [f"{s:+d} {h}" for s, h in scored if s])
         return self.cache[symbol]

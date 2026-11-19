@@ -2,9 +2,9 @@ name: Trading bot
 
 on:
   schedule:
-    # Weekdays at 19:00 UTC = 2:00 PM Eastern in winter, 3:00 PM Eastern in summer.
-    # GitHub can start scheduled runs late, so this leaves time before the 4:00 PM close.
-    - cron: "0 19 * * 1-5"
+    # Every 15 minutes, every day. Stocks are only checked while the market is open;
+    # crypto is checked on every run. GitHub can start scheduled runs a few minutes late.
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     # Lets you run it by hand from the Actions tab.
     inputs:
