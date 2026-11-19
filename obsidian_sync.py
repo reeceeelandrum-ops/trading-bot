@@ -167,6 +167,31 @@ def main():
 {', '.join(f"{stock_link(w['symbol'])} {pct(w['gap_pct'])}" for w in watch[:5])}
 """, extra_if_new="\n## My notes\n\n")
 
+    # --- Crypto notes ---
+    crypto = load("crypto") if (DATA / "crypto.json").exists() else []
+    for c in crypto:
+        name = c["symbol"].replace("/", "-")
+        c_orders = [o for o in orders if o["symbol"].replace("/", "") == c["symbol"].replace("/", "")]
+        pos = next((p for p in positions if p["symbol"] == c["symbol"].replace("/", "")), None)
+        write_note(VAULT / "Crypto" / f"{name}.md", {
+            "symbol": c["symbol"], "status": c["status"], "gap_pct": round(c["gap_pct"], 2),
+            "close": round(c["close"], 2), "held": pos is not None, "updated": today, "tags": ["trading/crypto"],
+        }, f"""
+# {c['symbol']}
+
+**{c['status']}** · trend gap {pct(c['gap_pct'])} · price {usd(c['close'])} · updated {stamp}
+20-day average {usd(c['sma_short'])} · 50-day average {usd(c['sma_long'])}. The bot holds {usd(c['dollars'], 0)} of it while the gap is clearly positive.
+
+{f"Holding {pos['qty']:g} worth {usd(pos['market_value'])}: {signed(pos['unrealized_pl'])} ({pct(pos['unrealized_pl_pct'])})." if pos else 'Not held.'}
+
+## Orders
+{table(['Date', 'Side', 'Amount', 'Fill price', 'Status'],
+       [[f"[[Daily/{o['date']}|{o['date']}]]", o['side'], f"{o['qty']:g}" if o['qty'] else '—', usd(o['filled_price']), o['status']] for o in c_orders])
+ if c_orders else 'No orders yet.'}
+
+Back to [[Home base]] · [[Strategy]]
+""", extra_if_new="\n## My notes\n\n")
+
     # --- Stock notes ---
     for w in watch:
         sym = w["symbol"]
@@ -176,7 +201,7 @@ def main():
             "symbol": sym,
             "status": w["status"],
             "rank": w["rank"],
-            "gap_pct": round(w["gap_pct"], 2),
+            "momentum_pct": round(w["momentum_pct"], 2),
             "close": round(w["close"], 2),
             "held": sym in held,
             "updated": today,
@@ -184,8 +209,8 @@ def main():
         }, f"""
 # {sym}
 
-**{w['status']}** · rank #{w['rank']} of {len(watch)} · gap {pct(w['gap_pct'])} · close {usd(w['close'])}
-Short average {usd(w['sma_short'])} · long average {usd(w['sma_long'])} · updated {stamp}
+**{w['status']}** · momentum rank #{w['rank']} of {len(watch)} · six-month return {pct(w['momentum_pct'])} · close {usd(w['close'])}
+{('Left out of targets: ' + w['note'] + '. ') if w.get('note') else ''}Updated {stamp}
 
 {f"Holding {pos['qty']:g} shares bought at {usd(pos['avg_cost'])}, now {usd(pos['price'])}: {signed(pos['unrealized_pl'])} ({pct(pos['unrealized_pl_pct'])})." if pos else 'Not held.'}
 
@@ -228,13 +253,16 @@ Back to [[Home base]]
     write_note(VAULT / "Strategy.md", {"updated": stamp, "tags": ["trading"]}, f"""
 # Strategy
 
-The bot runs on [GitHub Actions]({REPO_URL}/actions) every weekday at 19:00 UTC and trades the paper account by fixed rules:
+The bot runs on [GitHub Actions]({REPO_URL}/actions) every 15 minutes and trades the paper account by fixed rules:
 
-- **Trend:** it compares each stock's short and long moving averages. The gap between them is the trend.
-- **Sell** a held stock when the gap falls clearly below zero, or its recent news turns very bad.
-- **Buy** the strongest clear uptrends first, 1 share each, up to the position limit, while cash stays above the floor.
-- **Skip buys** for stocks reporting earnings soon, unprofitable or shrinking companies, and stocks with bad recent headlines.
-- Inside the buffer, nothing changes.
+- **Stocks, monthly momentum:** rank the Dow 30 by their return over the six months to the end of last month. The top five that are profitable with growing sales are the month's targets.
+- **Buy** targets it doesn't hold (1 share each), waiting out upcoming earnings and bad headlines; **sell** stocks that drop out of the targets.
+- **Crypto, daily trend (24/7):** hold a set dollar amount of Bitcoin and Ethereum while the 20-day average is clearly above the 50-day; sell when clearly below.
+- **News sell:** every run, sell a holding whose recent headlines score very badly.
+- **Rebound buy-back:** within 5 days of a news sale, buy back if the price climbs 3% above the sale price.
+- Cash never drops below the floor, and positions you bought yourself are never touched.
+
+Chosen after a backtest (Jan 2019 onward): monthly momentum returned +212% vs +186% for holding SPY and +73% for the old stock trend rules. Past results don't predict future ones.
 
 ## Current settings
 {table(['Rule', 'Value'], [[s['setting'], s['value']] for s in settings])}
@@ -278,11 +306,12 @@ views:
 ## Holding now
 {', '.join(stock_link(p['symbol']) for p in positions) or 'Nothing yet.'}
 
-## Strongest uptrends (bot's ranking)
-{', '.join(f"{stock_link(w['symbol'])} {pct(w['gap_pct'])}" for w in watch if w['status'] in ('Uptrend', 'Held'))[:2000] or 'None right now.'}
+## This month's stock targets (top momentum)
+{', '.join(f"{stock_link(w['symbol'])} {pct(w['momentum_pct'])}" for w in watch if w['status'] in ('Target', 'Held')) or 'None.'}
+{('Left out: ' + ', '.join(f"{stock_link(w['symbol'])} ({w['note']})" for w in watch if w['status'] == 'Left out')) if any(w['status'] == 'Left out' for w in watch) else ''}
 
-## Downtrends
-{', '.join(f"{stock_link(w['symbol'])} {pct(w['gap_pct'])}" for w in watch if w['status'] == 'Downtrend') or 'None right now.'}
+## Crypto
+{', '.join(f"[[Crypto/{c['symbol'].replace('/', '-')}|{c['symbol']}]] {c['status'].lower()} ({pct(c['gap_pct'])})" for c in crypto) or 'Not trading crypto.'}
 
 ## Notes
 [[Trade log]] · [[Strategy]] · [Bot code]({REPO_URL}) · [Bot runs]({REPO_URL}/actions)

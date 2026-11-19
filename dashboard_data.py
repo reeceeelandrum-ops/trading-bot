@@ -17,7 +17,9 @@ from pathlib import Path
 from alpaca.trading.enums import QueryOrderStatus
 from alpaca.trading.requests import GetOrdersRequest, GetPortfolioHistoryRequest
 
-from bot import HERE, NY, fetch_closes, get_trading_client, load_config, trend_table
+from bot import (HERE, NY, crypto_daily_closes, fetch_closes, get_trading_client, load_config,
+                 momentum_ranking, norm, trend_table)
+from signals import company_check
 
 OUT = HERE / "dashboard_data"
 SOURCE = Path(__file__).read_text()
@@ -91,7 +93,7 @@ def main():
         "unrealized_pl": f(p.unrealized_pl),
         "unrealized_pl_pct": f(p.unrealized_plpc) * 100,
         "today_pl": f(p.unrealized_intraday_pl),
-        "managed_by_bot": p.symbol in cfg["universe"],
+        "managed_by_bot": p.symbol in cfg["universe"] or p.symbol in {norm(s) for s in cfg["crypto"]["symbols"]},
     } for p in positions], "Open positions from Alpaca, valued at the latest price.")
 
     # ---- orders ----
@@ -158,27 +160,54 @@ def main():
         r.update(trade_days.get(r["date"], {"buys": 0, "sells": 0}))
     write("daily", eq_rows, "End-of-day account value and that day's profit or loss, with filled buys and sells per day.")
 
-    # ---- the bot's view of its stock list ----
-    closes = fetch_closes(cfg["universe"], cfg["lookback_days"])
-    table = trend_table(closes, cfg["short_window"], cfg["long_window"])
-    held = {p.symbol for p in positions}
-    b = cfg["buffer_pct"]
+    # ---- the bot's view: stock momentum ranking (same rules as bot.py) ----
+    closes = fetch_closes(cfg["universe"], cfg["momentum_lookback_days"] + 40)
+    mom = momentum_ranking(closes, cfg["momentum_lookback_days"], NOW.astimezone(NY).date())
+    trend = trend_table(closes, cfg["short_window"], cfg["long_window"])
+    held = {norm(p.symbol) for p in positions}
+    targets, left_out = [], {}
+    for sym in mom.index:
+        if len(targets) >= cfg["max_positions"]:
+            break
+        ok, note = company_check(sym, cfg["require_profitable"], cfg["min_revenue_growth_pct"])
+        (targets.append(sym) if ok else left_out.__setitem__(sym, note))
     rank = []
-    for i, (sym, r) in enumerate(table.iterrows(), 1):
-        status = ("Held" if sym in held else "Uptrend" if r.gap_pct > b
-                  else "Downtrend" if r.gap_pct < -b else "Neutral")
-        rank.append({"rank": i, "symbol": sym, "close": r.close, "sma_short": r.sma_short,
-                     "sma_long": r.sma_long, "gap_pct": r.gap_pct, "status": status})
-    write("watchlist", rank, f"The bot's {len(rank)} stocks ranked by how far the {cfg['short_window']}-day average is above the {cfg['long_window']}-day.")
+    for i, (sym, m) in enumerate(mom.items(), 1):
+        status = ("Held" if sym in held else "Target" if sym in targets
+                  else "Left out" if sym in left_out else "Not a target")
+        if sym in held and sym not in targets:
+            status = "Held, leaving"
+        t = trend.loc[sym] if sym in trend.index else None
+        rank.append({"rank": i, "symbol": sym, "kind": "stock", "momentum_pct": m, "status": status,
+                     "note": left_out.get(sym, ""), "close": closes[sym].dropna().iloc[-1],
+                     "gap_pct": None if t is None else t.gap_pct})
+    write("watchlist", rank, f"The bot's {len(rank)} stocks ranked by return over the {cfg['momentum_lookback_days']} trading days "
+          f"to the end of last month; the top {cfg['max_positions']} that pass the company check are this month's targets.")
+
+    # ---- crypto trend ----
+    crypto_rows, cc = [], None
+    if cfg["crypto"]["symbols"]:
+        cc = crypto_daily_closes(cfg["crypto"]["symbols"], 70)
+        ct = trend_table(cc, cfg["short_window"], cfg["long_window"])
+        b = cfg["buffer_pct"]
+        for sym, r in ct.iterrows():
+            status = ("Held" if norm(sym) in held else "Uptrend" if r.gap_pct > b
+                      else "Downtrend" if r.gap_pct < -b else "Neutral")
+            crypto_rows.append({"symbol": sym, "close": r.close, "sma_short": r.sma_short, "sma_long": r.sma_long,
+                                "gap_pct": r.gap_pct, "status": status, "dollars": cfg["crypto"]["dollars"]})
+    write("crypto", crypto_rows, f"Crypto daily trend: {cfg['short_window']}-day vs {cfg['long_window']}-day average; "
+          f"held while more than {cfg['buffer_pct']}% above.")
 
     price_rows = []
-    for sym in closes.columns:
-        c = closes[sym].dropna()
-        s, l = c.rolling(cfg["short_window"]).mean(), c.rolling(cfg["long_window"]).mean()
-        for d in c.index[-60:]:
-            price_rows.append({"symbol": sym, "date": d.strftime("%Y-%m-%d"), "close": c[d],
-                               "sma_short": s[d], "sma_long": l[d]})
-    write("prices", price_rows, "Last 60 trading days of closing prices with both moving averages, for each stock.")
+    frames = [closes] + ([cc] if cc is not None else [])
+    for frame in frames:
+        for sym in frame.columns:
+            c = frame[sym].dropna()
+            s, l = c.rolling(cfg["short_window"]).mean(), c.rolling(cfg["long_window"]).mean()
+            for d in c.index[-60:]:
+                price_rows.append({"symbol": sym, "date": d.strftime("%Y-%m-%d"), "close": c[d],
+                                   "sma_short": s[d], "sma_long": l[d]})
+    write("prices", price_rows, "Last 60 days of closing prices with both moving averages, for each stock and coin.")
 
     # ---- strategy settings ----
     labels = {
@@ -190,10 +219,15 @@ def main():
         "min_revenue_growth_pct": "Minimum sales growth (%)",
         "news_lookback_days": "News window (days)",
         "news_block_buy_score": "Skip buys at news score",
-        "news_sell_score": "Sell held stock at news score",
+        "news_sell_score": "Sell holding at news score",
+        "momentum_lookback_days": "Momentum window (trading days)",
+        "reentry_days": "Watch for rebound after news sale (days)",
+        "reentry_rebound_pct": "Buy back after rebound of (%)",
     }
-    write("settings", [{"setting": labels[k], "key": k, "value": str(cfg[k])} for k in labels if k in cfg],
-          "The bot's rules from config.json.")
+    rows = [{"setting": labels[k], "key": k, "value": str(cfg[k])} for k in labels if k in cfg]
+    rows += [{"setting": "Crypto traded", "key": "crypto_symbols", "value": ", ".join(cfg["crypto"]["symbols"])},
+             {"setting": "Dollars per coin", "key": "crypto_dollars", "value": str(cfg["crypto"]["dollars"])}]
+    write("settings", rows, "The bot's rules from config.json.")
 
     # ---- bot runs on GitHub ----
     gh = HERE / ".tools" / "gh"
