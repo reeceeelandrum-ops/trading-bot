@@ -127,6 +127,24 @@ class Rules(unittest.TestCase):
         self.assertEqual(r.index[0], "A")
 
 
+class Scanner(unittest.TestCase):
+    def test_grade_enters_next_open_and_signs_by_direction(self):
+        from scanner_eval import grade
+        days = pd.bdate_range("2026-11-16", periods=8)
+        a_open = pd.Series([100, 100, 100, 110, 111, 112, 113, 114.0], index=days)
+        a_close = pd.Series([100, 100, 110, 111, 112, 113, 114, 121.0], index=days)
+        s_open = pd.Series([500.0] * 8, index=days)
+        s_close = pd.Series([500, 500, 500, 505, 505, 505, 505, 510.0], index=days)
+        found = pd.Timestamp("2026-11-18 10:00")  # during the session -> enters next day's open (110)
+        a, s, x = grade(found, 5, "up", a_open, a_close, s_open, s_close)
+        self.assertAlmostEqual(a, 121 / 110 - 1)   # never credits the move that already happened
+        self.assertAlmostEqual(s, 510 / 500 - 1)
+        self.assertAlmostEqual(x, a - s)
+        _, _, x_down = grade(found, 5, "down", a_open, a_close, s_open, s_close)
+        self.assertAlmostEqual(x_down, -(a - s))
+        self.assertIsNone(grade(found, 6, "up", a_open, a_close, s_open, s_close))  # horizon not reached
+
+
 class News(unittest.TestCase):
     def test_headline_score(self):
         self.assertEqual(headline_score("UBS Adjusts Price Target on Home Depot to $417 From $420"), -1)
