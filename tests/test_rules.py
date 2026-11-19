@@ -45,6 +45,16 @@ class Config(unittest.TestCase):
         self.assertIn(c["stock_dollars"], ("auto",)) if isinstance(c["stock_dollars"], str) else None
         self.assertLess(c["news_sell_score"], 0)
 
+    def test_hands_off_positions_are_never_traded(self):
+        from bot import load_config
+        c = load_config()
+        for sym in c["hands_off"]:
+            self.assertNotIn(sym, c["universe"])  # never a target, never sold or trimmed
+        self.assertIn("NVDA", c["hands_off"])
+        # A hands-off stock held in the account is ignored even if the plan sees it held.
+        t = plan(["A"], {"A"}, {"A": 70, "NVDA": 99}, {"A": 100.0, "NVDA": 151.0}, 1e5, cfg(), OK, NEWS0, {})
+        self.assertNotIn("NVDA", [x[1] for x in t])
+
     def test_paper_only(self):
         self.assertIn("paper=True", (ROOT / "bot.py").read_text())
 

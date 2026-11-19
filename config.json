@@ -4,6 +4,7 @@
     "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
     "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT"
   ],
+  "hands_off": ["NVDA", "MU"],
   "max_positions": 10,
   "stock_dollars": "auto",
   "min_cash": 20000,

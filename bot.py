@@ -50,8 +50,11 @@ def load_config() -> dict:
         cfg = json.load(f)
     if cfg["short_window"] >= cfg["long_window"]:
         sys.exit("config error: short_window must be smaller than long_window")
-    cfg["universe"] = [s.upper() for s in cfg["universe"]]
+    # hands_off: the user's own positions. The bot never buys, sells, trims or sizes with them.
+    cfg["hands_off"] = sorted({norm(s).upper() for s in cfg.get("hands_off", [])})
+    cfg["universe"] = [s.upper() for s in cfg["universe"] if s.upper() not in cfg["hands_off"]]
     cfg.setdefault("crypto", {"symbols": [], "dollars": 0})
+    cfg["crypto"]["symbols"] = [s for s in cfg["crypto"]["symbols"] if norm(s).upper() not in cfg["hands_off"]]
     return cfg
 
 
@@ -314,7 +317,10 @@ def main():
         print("Connected to paper account." if PUBLIC_LOG else
               f"Connected to paper account {account.account_number} (cash ${cash:,.2f}).")
         print(f"Stock market open: {market_open}")
-        held = held_positions(client)
+        positions = client.get_all_positions()
+        held = {norm(p.symbol): float(p.qty) for p in positions if norm(p.symbol) not in cfg["hands_off"]}
+        # Size the bot's positions from what the bot manages, not from the user's own holdings.
+        equity -= sum(float(p.market_value) for p in positions if norm(p.symbol) in cfg["hands_off"])
         midnight = now.astimezone(NY).replace(hour=0, minute=0, second=0, microsecond=0)
         for o in recent_orders(client, now - timedelta(days=cfg["reentry_days"] + 3)):
             st = getattr(o.status, "value", o.status)
