@@ -7,3 +7,4 @@ last_trade.json
 .tools/
 mac-schedule.plist.disabled
 dashboard_data/
+.cache/
