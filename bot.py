@@ -64,7 +64,9 @@ def norm(sym: str) -> str:
 def fetch_closes(symbols: list[str], lookback_days: int) -> pd.DataFrame:
     """Daily closes (one column per symbol) for about the last `lookback_days` trading days."""
     start = date.today() - timedelta(days=int(lookback_days * 1.6) + 10)
-    data = yf.download(symbols, start=start.isoformat(), interval="1d", auto_adjust=True, progress=False)
+    # threads=False: parallel downloads can clash on yfinance's cache ("database is locked").
+    data = yf.download(symbols, start=start.isoformat(), interval="1d", auto_adjust=True,
+                       progress=False, threads=False)
     if data.empty:
         sys.exit("No price data returned")
     closes = data["Close"]
