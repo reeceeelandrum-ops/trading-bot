@@ -55,6 +55,16 @@ class Config(unittest.TestCase):
         t = plan(["A"], {"A"}, {"A": 70, "NVDA": 99}, {"A": 100.0, "NVDA": 151.0}, 1e5, cfg(), OK, NEWS0, {})
         self.assertNotIn("NVDA", [x[1] for x in t])
 
+    def test_universe_size_is_deliberate(self):
+        # The investable list must only change on purpose. If hands_off or the universe changes,
+        # update EXPECTED here after re-running the backtests (2026-11-20 lesson).
+        from bot import load_config
+        c = load_config()
+        raw = json.loads((ROOT / "config.json").read_text())
+        EXPECTED = 29  # Dow 30 minus NVDA (on hands_off since 2026-11-19)
+        self.assertEqual(len(c["universe"]), EXPECTED,
+                         f"universe is {len(c['universe'])} stocks; hands_off={raw.get('hands_off')} — re-backtest and update EXPECTED")
+
     def test_paper_only(self):
         self.assertIn("paper=True", (ROOT / "bot.py").read_text())
 

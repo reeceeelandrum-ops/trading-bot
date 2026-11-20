@@ -61,6 +61,10 @@ volatility-managed momentum (12–20% targets); keyword news buy-block (hurt). D
   user's $15k NVDA buy shrink every bot target, so all 10 positions sat at the trim line. Caught by
   simulating the next day before the open. Simulate the next session after ANY change, including
   changes made to protect something.
+- **2026-11-20 — a protection silently changed the strategy.** Putting NVDA on `hands_off` also removed it from
+  the investable universe, so the bot can never pick it and every backtest since ran on 29 stocks (live-rule
+  backtest fell from +18.5%/yr to +15.5%/yr, 2016+). Spotted only because two runs disagreed. Any config change
+  must state its effect on the universe and be re-backtested; a test now pins the universe size.
 - **Judge results against the market, not zero.** A red day when SPY is −2% is not a strategy failure;
   compare to SPY over months, not days.
 
