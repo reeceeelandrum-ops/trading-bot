@@ -45,9 +45,17 @@ NY = ZoneInfo("America/New_York")
 PUBLIC_LOG = bool(os.getenv("GITHUB_ACTIONS"))  # hide balances in public run logs
 
 
-def load_config() -> dict:
+def load_config(today: date | None = None) -> dict:
     with open(HERE / "config.json") as f:
         cfg = json.load(f)
+    # Dated changes switch on by themselves on their effective date (New York time), so a rule
+    # change can be scheduled for a rebalance instead of applied mid-month.
+    today = today or datetime.now(timezone.utc).astimezone(NY).date()
+    for change in sorted(cfg.pop("changes", []), key=lambda c: c["effective"]):
+        if date.fromisoformat(change["effective"]) <= today:
+            cfg.update({k: v for k, v in change.items() if k not in ("effective", "why")})
+    cfg.setdefault("rebalance_months", 1)
+    cfg.setdefault("size_excludes_hands_off", False)
     if cfg["short_window"] >= cfg["long_window"]:
         sys.exit("config error: short_window must be smaller than long_window")
     # hands_off: the user's own positions. The bot never buys, sells, trims or sizes with them.
@@ -90,6 +98,24 @@ def trend_table(closes: pd.DataFrame, short: int, long: int) -> pd.DataFrame:
         rows[sym] = {"close": c.iloc[-1], "sma_short": s, "sma_long": l,
                      "gap_pct": (s - l) / l * 100, "bar_date": c.index[-1].date()}
     return pd.DataFrame.from_dict(rows, orient="index").sort_values("gap_pct", ascending=False)
+
+
+def rebalance_schedule(cfg: dict, today: date) -> tuple[date, bool]:
+    """(month the targets are ranked as of, whether this month is a rebalance month).
+    Monthly mode: every month. Every-N-months mode: targets are fixed from the most recent
+    rebalance month (anchor + k*N) until the next one, and the bot only trims, tops up or
+    buys new targets during a rebalance month."""
+    n = int(cfg.get("rebalance_months", 1))
+    anchor = cfg.get("rebalance_anchor")
+    if n <= 1 or not anchor:
+        return today.replace(day=1), True
+    ay, am = (int(x) for x in anchor.split("-"))
+    months = (today.year * 12 + today.month - 1) - (ay * 12 + am - 1)
+    if months < 0:
+        return today.replace(day=1), True
+    k = months // n
+    m = ay * 12 + am - 1 + k * n
+    return date(m // 12, m % 12 + 1, 1), months % n == 0
 
 
 def momentum_ranking(closes: pd.DataFrame, lookback: int, as_of: date) -> pd.Series:
@@ -157,7 +183,9 @@ def stock_dollars(cfg: dict, equity: float) -> float:
 
 def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], prices: dict[str, float],
                 cash: float, cfg: dict, buy_check, news_score, news_sold: dict[str, float],
-                equity: float = 100_000.0) -> list[tuple]:
+                equity: float = 100_000.0, rebalance_window: bool = True) -> list[tuple]:
+    """Outside a rebalance window the bot just holds: no trims, top-ups or new target buys.
+    The very-bad-news sell and the rebound buy-back still work at any time."""
     trades = []
     dollars = stock_dollars(cfg, equity)
 
@@ -176,7 +204,7 @@ def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], 
             trades.append(("sell", sym, held[sym], f"bad news, score {score:+d}"))
             continue
         price = prices.get(sym)
-        if price and held[sym] * price > dollars * 1.25:  # grown well past its share: trim
+        if rebalance_window and price and held[sym] * price > dollars * 1.25:  # grown well past its share: trim
             extra = int(held[sym]) - int(dollars // price)
             if extra > 0:
                 trades.append(("sell", sym, extra, f"trim to target size (${held[sym]*price:,.0f} vs ${dollars:,.0f})"))
@@ -187,6 +215,8 @@ def plan_stocks(targets: list[str], universe: set[str], held: dict[str, float], 
     for sym in targets:
         if sym in selling:
             continue
+        if not rebalance_window and sym not in news_sold:
+            continue  # hold until the next rebalance; only rebound buy-backs happen in between
         price = prices.get(sym)
         if price is None:
             print(f"  {sym}: skipped, no current price")
@@ -319,9 +349,15 @@ def main():
         print(f"Stock market open: {market_open}")
         positions = client.get_all_positions()
         held = {norm(p.symbol): float(p.qty) for p in positions if norm(p.symbol) not in cfg["hands_off"]}
-        # Sizing uses the whole account. Subtracting hands-off holdings made a manual purchase
-        # shrink every target and trigger trims (2026-11-19 lesson); the cash floor already stops
-        # the bot spending money it doesn't have.
+        # Monthly mode sizes from the whole account: subtracting hands-off holdings mid-month made a
+        # manual purchase shrink every target and trigger trims (2026-11-19 lesson). Long-term mode
+        # (from 2026-12-01) sizes without them, applied at the yearly rebalance, so the bot never
+        # plans positions with money that sits in the user's own stocks.
+        if cfg["size_excludes_hands_off"]:
+            # Leave out every holding the bot doesn't manage: hands_off ones and anything else the
+            # user bought themselves (e.g. a CRWV trade on 2026-11-24 outside the bot's lists).
+            managed = set(cfg["universe"]) | {norm(s) for s in cfg["crypto"]["symbols"]}
+            equity -= sum(float(p.market_value) for p in positions if norm(p.symbol) not in managed)
         midnight = now.astimezone(NY).replace(hour=0, minute=0, second=0, microsecond=0)
         for o in recent_orders(client, now - timedelta(days=cfg["reentry_days"] + 3)):
             st = getattr(o.status, "value", o.status)
@@ -339,9 +375,13 @@ def main():
 
     # ----- stocks -----
     if market_open:
-        closes = fetch_closes(cfg["universe"], cfg["momentum_lookback_days"] + 40)
         today = now.astimezone(NY).date()
-        rank = momentum_ranking(closes, cfg["momentum_lookback_days"], today)
+        as_of, window = rebalance_schedule(cfg, today)
+        # enough history to rank as of the last rebalance month (up to a year back)
+        closes = fetch_closes(cfg["universe"], cfg["momentum_lookback_days"] + 40 + 21 * int(cfg["rebalance_months"]))
+        rank = momentum_ranking(closes, cfg["momentum_lookback_days"], as_of)
+        print(f"Rebalance: every {cfg['rebalance_months']} month(s); targets ranked as of {as_of:%B %Y}; "
+              f"{'REBALANCE WINDOW — trims, top-ups and new buys allowed' if window else 'holding until the next rebalance'}")
         # Targets: the strongest stocks that pass the company check (a lasting test, so a
         # failing stock gives its slot to the next one). Earnings and news are short-lived,
         # so they only delay a buy.
@@ -355,7 +395,7 @@ def main():
                 company_notes[sym] = note
             else:
                 print(f"  {sym}: left out of targets, {note}")
-        print(f"\nMomentum ranking for {today:%B %Y} ({cfg['momentum_lookback_days']} trading days to end of last month):")
+        print(f"\nMomentum ranking as of {as_of:%B %Y} ({cfg['momentum_lookback_days']} trading days to the end of the month before):")
         for i, (sym, r) in enumerate(rank.items(), 1):
             tag = "TARGET" if sym in targets else ""
             print(f"  {i:2d}. {sym:6s} {r:+7.2f}%  {tag}{'  held' if held.get(sym, 0) > 0 else ''}")
@@ -368,7 +408,8 @@ def main():
 
         print("\nStock checks:")
         for side, sym, amt, why in plan_stocks(targets, set(cfg["universe"]), held, prices, cash, cfg,
-                                               buy_check, lambda s: news.score(s)[0], news_sold, equity):
+                                               buy_check, lambda s: news.score(s)[0], news_sold, equity,
+                                               rebalance_window=window):
             trades.append((side, sym, amt, why, False))
             cash += (amt if side == "sell" else -amt) * prices.get(sym, 0)
     else:

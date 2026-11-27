@@ -137,6 +137,46 @@ class Rules(unittest.TestCase):
         self.assertEqual(r.index[0], "A")
 
 
+class LongTermMode(unittest.TestCase):
+    """Long-term mode switches on by itself on 2026-12-01: top 15, once a year, hold in between."""
+
+    def test_dated_change_switches_on_dec_1(self):
+        from datetime import date
+        from bot import load_config
+        before, after = load_config(date(2026, 11, 30)), load_config(date(2026, 12, 1))
+        self.assertEqual((before["max_positions"], before["rebalance_months"], before["size_excludes_hands_off"]), (10, 1, False))
+        self.assertEqual((after["max_positions"], after["rebalance_months"], after["size_excludes_hands_off"]), (15, 12, True))
+        self.assertNotIn("changes", after)
+        self.assertEqual(len(after["universe"]), 29)  # the change must not touch the stock list
+
+    def test_yearly_schedule(self):
+        from datetime import date
+        from bot import load_config, rebalance_schedule
+        c = load_config(date(2026, 12, 1))
+        self.assertEqual(rebalance_schedule(c, date(2026, 12, 1)), (date(2026, 12, 1), True))
+        self.assertEqual(rebalance_schedule(c, date(2026, 12, 31)), (date(2026, 12, 1), True))
+        self.assertEqual(rebalance_schedule(c, date(2027, 3, 15)), (date(2026, 12, 1), False))   # targets frozen
+        self.assertEqual(rebalance_schedule(c, date(2027, 11, 30)), (date(2026, 12, 1), False))
+        self.assertEqual(rebalance_schedule(c, date(2027, 12, 1)), (date(2027, 12, 1), True))    # next year's rebalance
+        monthly = load_config(date(2026, 11, 26))
+        self.assertEqual(rebalance_schedule(monthly, date(2026, 11, 26)), (date(2026, 11, 1), True))
+
+    def test_holds_between_rebalances(self):
+        c = cfg(stock_dollars=5000)
+        P = {"A": 100.0, "B": 100.0, "C": 100.0}
+        # A far above target (would trim), B far below (would top up), C not held (would buy)
+        t = plan(["A", "B", "C"], {"A", "B", "C"}, {"A": 100, "B": 10}, P, 1e5, c, OK, NEWS0, {}, rebalance_window=False)
+        self.assertEqual(t, [])
+        t = summary(plan(["A", "B", "C"], {"A", "B", "C"}, {"A": 100, "B": 10}, P, 1e5, c, OK, NEWS0, {}, rebalance_window=True))
+        self.assertIn(("sell", "A", 50), t); self.assertIn(("buy", "B", 40), t); self.assertIn(("buy", "C", 50), t)
+
+    def test_safety_valves_still_work_between_rebalances(self):
+        c = cfg(stock_dollars=5000)
+        self.assertEqual(summary(plan(["A"], {"A"}, {"A": 50}, {"A": 100.0}, 1e5, c, OK, lambda s: -5, {}, rebalance_window=False)),
+                         [("sell", "A", 50)])
+        self.assertEqual(len(plan(["A"], {"A"}, {}, {"A": 104.0}, 1e5, c, OK, NEWS0, {"A": 100.0}, rebalance_window=False)), 1)
+
+
 class Scanner(unittest.TestCase):
     def test_grade_enters_next_open_and_signs_by_direction(self):
         from scanner_eval import grade

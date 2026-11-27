@@ -11,6 +11,11 @@ personal paths.
   sell stocks that leave the targets. Buys wait out earnings (`earnings_blackout_days`).
   The news buy-block (`news_block_buy_score`) is **off** (null) since 2026-11-19: it skipped stocks
   that then beat the average (`news_backtest.py`).
+- **From 2026-12-01 — long-term mode** (a dated entry in `config.json` → `changes`, applied by `load_config`):
+  top 15, ranked once a year in December (`rebalance_months: 12`, anchor `2026-12`), and the bot HOLDS in
+  between: no trims, top-ups or new buys outside a rebalance month (`rebalance_schedule`). Very-bad-news sell
+  and rebound buy-back still run any time. Sizing uses only what the bot manages (excludes hands_off and any
+  other position the user bought). Chosen by the user from `backtest_longterm.py` (2026-11-20).
 - **Crypto:** `crypto.symbols` on a daily SMA `short_window`/`long_window` trend with `buffer_pct`.
 - **Every run:** very-bad-news sell (`news_sell_score`, a rare safety valve with no proven edge), rebound buy-back (`reentry_*`), cash never below
   `min_cash`, never touch positions outside the bot's lists or on the `hands_off` list (the user's
@@ -31,7 +36,7 @@ personal paths.
 
 ## Already tested — don't re-propose without new evidence
 SPY golden-cross and 200-day regime filters; 15–25% trailing stops; 12-month and 12-1 momentum
-(no better than 6-month); 5 vs 8 vs 10 vs 15 positions (10 chosen); crypto 50/200 cross;
+(no better than 6-month); 5 vs 8 vs 10 vs 15 positions (10, then top-15 yearly from 2026-12-01); monthly vs quarterly vs yearly rebalancing (`backtest_longterm.py`); crypto 50/200 cross;
 volatility-managed momentum (12–20% targets); keyword news buy-block (hurt). Details in the experiment log.
 
 ## Lessons from other AI trading agents (2026-11 research)
@@ -65,6 +70,10 @@ volatility-managed momentum (12–20% targets); keyword news buy-block (hurt). D
   the investable universe, so the bot can never pick it and every backtest since ran on 29 stocks (live-rule
   backtest fell from +18.5%/yr to +15.5%/yr, 2016+). Spotted only because two runs disagreed. Any config change
   must state its effect on the universe and be re-backtested; a test now pins the universe size.
+- **2026-11-20 — a report printed the wrong number.** The daily Obsidian note's "Top of the bot's ranking"
+  shows each stock's SMA trend gap (`gap_pct`), not its 6-month momentum (`momentum_pct`), so MRK
+  (−0.62%) appeared to out-rank TRV (+3.83%). Order was right, numbers were not; no trading effect.
+  Spot-check every report number against the field it claims to show.
 - **Judge results against the market, not zero.** A red day when SPY is −2% is not a strategy failure;
   compare to SPY over months, not days.
 

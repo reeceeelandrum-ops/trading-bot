@@ -26,5 +26,17 @@
   "news_block_buy_score": null,
   "news_sell_score": -4,
   "reentry_days": 5,
-  "reentry_rebound_pct": 3
+  "reentry_rebound_pct": 3,
+
+  "rebalance_months": 1,
+  "changes": [
+    {
+      "effective": "2026-12-01",
+      "why": "Long-term mode chosen by the user 2026-11-20 (backtest_longterm.py): top 15, rebalanced once a year, held in between; size only from what the bot manages (excludes the user's own holdings)",
+      "max_positions": 15,
+      "rebalance_months": 12,
+      "rebalance_anchor": "2026-12",
+      "size_excludes_hands_off": true
+    }
+  ]
 }

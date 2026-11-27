@@ -18,7 +18,7 @@ from alpaca.trading.enums import QueryOrderStatus
 from alpaca.trading.requests import GetOrdersRequest, GetPortfolioHistoryRequest
 
 from bot import (HERE, NY, crypto_daily_closes, fetch_closes, get_trading_client, load_config,
-                 momentum_ranking, norm, trend_table)
+                 momentum_ranking, norm, rebalance_schedule, trend_table)
 from signals import company_check
 
 OUT = HERE / "dashboard_data"
@@ -161,8 +161,9 @@ def main():
     write("daily", eq_rows, "End-of-day account value and that day's profit or loss, with filled buys and sells per day.")
 
     # ---- the bot's view: stock momentum ranking (same rules as bot.py) ----
-    closes = fetch_closes(cfg["universe"], cfg["momentum_lookback_days"] + 40)
-    mom = momentum_ranking(closes, cfg["momentum_lookback_days"], NOW.astimezone(NY).date())
+    as_of, _window = rebalance_schedule(cfg, NOW.astimezone(NY).date())
+    closes = fetch_closes(cfg["universe"], cfg["momentum_lookback_days"] + 40 + 21 * int(cfg["rebalance_months"]))
+    mom = momentum_ranking(closes, cfg["momentum_lookback_days"], as_of)
     trend = trend_table(closes, cfg["short_window"], cfg["long_window"])
     held = {norm(p.symbol) for p in positions}
     targets, left_out = [], {}
